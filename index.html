@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>لعبة شطرنج أونلاين</title>
+    
+    <!-- مكتبة CSS الخارجية الخاصة باللوحة -->
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+
+    <!-- ==================== تنسيقات CSS ==================== -->
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            margin: 0;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 1.8rem;
+        }
+
+        #status {
+            font-size: 1.1rem;
+            margin-bottom: 15px;
+            font-weight: bold;
+            color: #f1c40f;
+        }
+
+        /* حاوية اللوحة لجعلها متجاوبة 100% مع جميع الشاشات */
+        #board-container {
+            width: 100%;
+            max-width: 480px; /* حجم أقصى مناسب للشاشات الكبيرة */
+            margin: 0 auto;
+        }
+
+        #myBoard {
+            width: 100%;
+            box-shadow: 0px 8px 20px rgba(0,0,0,0.5);
+            border-radius: 4px;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+
+        /* ==================== تأثيرات تحديد الخانات والحركات (Chess.com Style) ==================== */
+        
+        /* تحديد الخانة المختارة */
+        .square-55d63.highlight {
+            background-color: rgba(255, 255, 0, 0.4) !important;
+        }
+
+        /* نقطة الحركة الممكنة (خانة فارغة) */
+        .square-55d63.possible-move {
+            position: relative;
+        }
+        .square-55d63.possible-move::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 28%;
+            height: 28%;
+            background: rgba(0, 0, 0, 0.28);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* دائرة للأكل (خانة فيها قطعة خصم) */
+        .square-55d63.possible-capture {
+            position: relative;
+        }
+        .square-55d63.possible-capture::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 82%;
+            height: 82%;
+            border: 5px solid rgba(0, 0, 0, 0.25);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        /* تحسين العرض للأجهزة الصغيرة جداً */
+        @media (max-width: 400px) {
+            h1 { font-size: 1.4rem; }
+            #status { font-size: 0.95rem; }
+            body { padding: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ==================== هيكل HTML ==================== -->
+    <h1>شطرنج أونلاين</h1>
+    <div id="status">جاري الاتصال...</div>
+    
+    <!-- حاوية اللوحة للتجاوب مع كافة الأجهزة -->
+    <div id="board-container">
+        <div id="myBoard"></div>
+    </div>
+
+    <!-- المكتبات الخارجية عبر CDN -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+
+    <!-- ==================== كود JavaScript ==================== -->
+    <script>
+        const socket = io();
+        const game = new Chess();
+        let board = null;
+        let playerColor = null;
+        let selectedSquare = null;
+
+        const statusEl = document.getElementById('status');
+
+        // إزالة التحديد والحركات الممكنة من اللوحة
+        function removeHighlights() {
+            $('#myBoard .square-55d63').removeClass('highlight possible-move possible-capture');
+        }
+
+        // إظهار الحركات الممكنة لقطعة معينة
+        function showPossibleMoves(square) {
+            removeHighlights();
+
+            // التأكد من أن الدور دور اللاعب والقطعة ملكه
+            const piece = game.get(square);
+            if (!piece) return;
+            if ((playerColor === 'w' && piece.color !== 'w') ||
+                (playerColor === 'b' && piece.color !== 'b')) return;
+            if ((game.turn() === 'w' && playerColor !== 'w') ||
+                (game.turn() === 'b' && playerColor !== 'b')) return;
+
+            const moves = game.moves({
+                square: square,
+                verbose: true
+            });
+
+            if (moves.length === 0) return;
+
+            // تمييز الخانة المحددة باللون الأصفر
+            $(`#myBoard .square-${square}`).addClass('highlight');
+
+            // تمييز الحركات الممكنة (نقاط للتحرك ودوائر للأكل)
+            moves.forEach((move) => {
+                if (move.captured) {
+                    $(`#myBoard .square-${move.to}`).addClass('possible-capture');
+                } else {
+                    $(`#myBoard .square-${move.to}`).addClass('possible-move');
+                }
+            });
+        }
+
+        // تنفيذ الحركة وإرسالها للخادم
+        function makeMove(from, to) {
+            const move = game.move({
+                from: from,
+                to: to,
+                promotion: 'q'
+            });
+
+            if (move === null) return false;
+
+            socket.emit('move', { from: from, to: to, promotion: 'q' });
+            board.position(game.fen());
+            removeHighlights();
+            selectedSquare = null;
+            return true;
+        }
+
+        // عند بداية سحب قطعة (Drag & Drop)
+        function onDragStart(source, piece) {
+            if (game.game_over()) return false;
+            if (playerColor === 'spectator') return false;
+
+            if ((playerColor === 'w' && piece.search(/^b/) !== -1) ||
+                (playerColor === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+
+            if ((game.turn() === 'w' && playerColor !== 'w') ||
+                (game.turn() === 'b' && playerColor !== 'b')) {
+                return false;
+            }
+
+            selectedSquare = source;
+            showPossibleMoves(source);
+        }
+
+        // عند إفلات قطعة (Drop)
+        function onDrop(source, target) {
+            const moveSuccessful = makeMove(source, target);
+            if (!moveSuccessful) {
+                removeHighlights();
+                selectedSquare = null;
+                return 'snapback';
+            }
+        }
+
+        function onSnapEnd() {
+            board.position(game.fen());
+        }
+
+        // إعدادات اللوحة
+        const config = {
+            draggable: true,
+            position: 'start',
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: onSnapEnd
+        };
+
+        board = Chessboard('myBoard', config);
+
+        // إضافة خاصية النقر (Click-to-move) للشاشات والهواتف
+        $('#myBoard').on('click', '.square-55d63', function () {
+            if (game.game_over() || playerColor === 'spectator') return;
+
+            const square = $(this).attr('data-square');
+
+            // إذا كانت هناك قطعة محددة سابقاً وحاول اللاعب الانتقال للخانة الجديدة
+            if (selectedSquare) {
+                if (selectedSquare === square) {
+                    // إلغاء التحديد عند الضغط على نفس الخانة مرة أخرى
+                    selectedSquare = null;
+                    removeHighlights();
+                    return;
+                }
+
+                const moveMade = makeMove(selectedSquare, square);
+                if (moveMade) return;
+            }
+
+            // تحديد قطعة جديدة وإظهار الحركات
+            const piece = game.get(square);
+            if (piece && piece.color === playerColor && game.turn() === playerColor) {
+                selectedSquare = square;
+                showPossibleMoves(square);
+            } else {
+                selectedSquare = null;
+                removeHighlights();
+            }
+        });
+
+        // إعادة ضبط حجم اللوحة تلقائياً عند تغيير حجم الشاشة أو تدوير الهاتف
+        $(window).resize(() => {
+            board.resize();
+        });
+
+        // استقبال نوع اللاعب من الخادم
+        socket.on('playerType', (type) => {
+            playerColor = type;
+            if (type === 'w') {
+                statusEl.innerText = "أنت تلعب بالقطع البيضاء (دورك)";
+                board.orientation('white');
+            } else if (type === 'b') {
+                statusEl.innerText = "أنت تلعب بالقطع السوداء (انتظر دور الأبيض)";
+                board.orientation('black');
+            } else {
+                statusEl.innerText = "أنت مشاهد فقط (الغرفة ممتلئة)";
+            }
+        });
+
+        // تحديث حالة اللوحة من الخادم
+        socket.on('boardState', (fen) => {
+            game.load(fen);
+            board.position(fen);
+            removeHighlights();
+            selectedSquare = null;
+        });
+
+        // استقبال حركة الخصم
+        socket.on('move', (moveData) => {
+            game.move(moveData);
+            board.position(game.fen());
+            removeHighlights();
+            selectedSquare = null;
+        });
+    </script>
+</body>
+</html>
