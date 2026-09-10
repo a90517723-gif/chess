@@ -8,7 +8,7 @@ const server = http.createServer(app);
 const io = socketIo(server);
 
 // مشاركة الملفات الثابتة في مجلد public
-app.use(express.static('public'));
+app.use(express.static(__dirname));
 
 let players = {}; // تخزين معرّفات اللاعبين
 let game = new Chess(); // إنشاء لعبة شطرنج جديدة
