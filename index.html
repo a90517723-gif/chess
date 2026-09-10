@@ -125,8 +125,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
 
-    <!-- ==================== كود JavaScript ==================== -->
-    <script>
+<script>
         const socket = io();
         const game = new Chess();
         let board = null;
@@ -134,6 +133,42 @@
         let selectedSquare = null;
 
         const statusEl = document.getElementById('status');
+
+        // ================== دالة تحديث حالة اللعبة والنص ==================
+        function updateStatus() {
+            let statusText = '';
+
+            // فحص انتهاء اللعبة
+            if (game.in_checkmate()) {
+                // إذا كان الدور على الأبيض وهو في حالة كش مات، فالأسود هو الفائز والعكس صحيح
+                if (game.turn() === 'w') {
+                    statusText = "كش مات! فاز اللاعب بالقطع السوداء 🏆";
+                } else {
+                    statusText = "كش مات! فاز اللاعب بالقطع البيضاء 🏆";
+                }
+            } 
+            // فحص التعادل
+            else if (game.in_draw() || game.in_stalemate() || game.in_threefold_repetition()) {
+                statusText = "انتهت اللعبة بالتعادل 🤝";
+            } 
+            // اللعبة مستمرة
+            else {
+                if (playerColor === game.turn()) {
+                    statusText = "دورك الآن! (العب بـ " + (playerColor === 'w' ? 'البيضاء' : 'السوداء') + ")";
+                } else if (playerColor === 'spectator') {
+                    statusText = "دور اللاعب " + (game.turn() === 'w' ? 'الأبيض' : 'الأسود');
+                } else {
+                    statusText = "انتظر دور الخصم... ⏳";
+                }
+
+                // فحص إذا كان هناك "كش" للملك
+                if (game.in_check()) {
+                    statusText += " - (كش ملك! ⚠️)";
+                }
+            }
+
+            statusEl.innerText = statusText;
+        }
 
         // إزالة التحديد والحركات الممكنة من اللوحة
         function removeHighlights() {
@@ -144,7 +179,6 @@
         function showPossibleMoves(square) {
             removeHighlights();
 
-            // التأكد من أن الدور دور اللاعب والقطعة ملكه
             const piece = game.get(square);
             if (!piece) return;
             if ((playerColor === 'w' && piece.color !== 'w') ||
@@ -152,17 +186,11 @@
             if ((game.turn() === 'w' && playerColor !== 'w') ||
                 (game.turn() === 'b' && playerColor !== 'b')) return;
 
-            const moves = game.moves({
-                square: square,
-                verbose: true
-            });
-
+            const moves = game.moves({ square: square, verbose: true });
             if (moves.length === 0) return;
 
-            // تمييز الخانة المحددة باللون الأصفر
             $(`#myBoard .square-${square}`).addClass('highlight');
 
-            // تمييز الحركات الممكنة (نقاط للتحرك ودوائر للأكل)
             moves.forEach((move) => {
                 if (move.captured) {
                     $(`#myBoard .square-${move.to}`).addClass('possible-capture');
@@ -174,11 +202,7 @@
 
         // تنفيذ الحركة وإرسالها للخادم
         function makeMove(from, to) {
-            const move = game.move({
-                from: from,
-                to: to,
-                promotion: 'q'
-            });
+            const move = game.move({ from: from, to: to, promotion: 'q' });
 
             if (move === null) return false;
 
@@ -186,29 +210,22 @@
             board.position(game.fen());
             removeHighlights();
             selectedSquare = null;
+            updateStatus(); // <--- تحديث النص بعد الحركة مباشرة
             return true;
         }
 
-        // عند بداية سحب قطعة (Drag & Drop)
         function onDragStart(source, piece) {
             if (game.game_over()) return false;
             if (playerColor === 'spectator') return false;
-
             if ((playerColor === 'w' && piece.search(/^b/) !== -1) ||
-                (playerColor === 'b' && piece.search(/^w/) !== -1)) {
-                return false;
-            }
-
+                (playerColor === 'b' && piece.search(/^w/) !== -1)) return false;
             if ((game.turn() === 'w' && playerColor !== 'w') ||
-                (game.turn() === 'b' && playerColor !== 'b')) {
-                return false;
-            }
+                (game.turn() === 'b' && playerColor !== 'b')) return false;
 
             selectedSquare = source;
             showPossibleMoves(source);
         }
 
-        // عند إفلات قطعة (Drop)
         function onDrop(source, target) {
             const moveSuccessful = makeMove(source, target);
             if (!moveSuccessful) {
@@ -222,7 +239,6 @@
             board.position(game.fen());
         }
 
-        // إعدادات اللوحة
         const config = {
             draggable: true,
             position: 'start',
@@ -234,26 +250,21 @@
 
         board = Chessboard('myBoard', config);
 
-        // إضافة خاصية النقر (Click-to-move) للشاشات والهواتف
         $('#myBoard').on('click', '.square-55d63', function () {
             if (game.game_over() || playerColor === 'spectator') return;
 
             const square = $(this).attr('data-square');
 
-            // إذا كانت هناك قطعة محددة سابقاً وحاول اللاعب الانتقال للخانة الجديدة
             if (selectedSquare) {
                 if (selectedSquare === square) {
-                    // إلغاء التحديد عند الضغط على نفس الخانة مرة أخرى
                     selectedSquare = null;
                     removeHighlights();
                     return;
                 }
-
                 const moveMade = makeMove(selectedSquare, square);
                 if (moveMade) return;
             }
 
-            // تحديد قطعة جديدة وإظهار الحركات
             const piece = game.get(square);
             if (piece && piece.color === playerColor && game.turn() === playerColor) {
                 selectedSquare = square;
@@ -264,39 +275,29 @@
             }
         });
 
-        // إعادة ضبط حجم اللوحة تلقائياً عند تغيير حجم الشاشة أو تدوير الهاتف
-        $(window).resize(() => {
-            board.resize();
-        });
+        $(window).resize(() => board.resize());
 
-        // استقبال نوع اللاعب من الخادم
         socket.on('playerType', (type) => {
             playerColor = type;
-            if (type === 'w') {
-                statusEl.innerText = "أنت تلعب بالقطع البيضاء (دورك)";
-                board.orientation('white');
-            } else if (type === 'b') {
-                statusEl.innerText = "أنت تلعب بالقطع السوداء (انتظر دور الأبيض)";
-                board.orientation('black');
-            } else {
-                statusEl.innerText = "أنت مشاهد فقط (الغرفة ممتلئة)";
-            }
+            if (type === 'w') board.orientation('white');
+            else if (type === 'b') board.orientation('black');
+            updateStatus(); // <--- تحديث النص عند بدء اللعبة
         });
 
-        // تحديث حالة اللوحة من الخادم
         socket.on('boardState', (fen) => {
             game.load(fen);
             board.position(fen);
             removeHighlights();
             selectedSquare = null;
+            updateStatus(); // <--- تحديث النص عند دخول لاعب جديد
         });
 
-        // استقبال حركة الخصم
         socket.on('move', (moveData) => {
             game.move(moveData);
             board.position(game.fen());
             removeHighlights();
             selectedSquare = null;
+            updateStatus(); // <--- تحديث النص عند حركة الخصم
         });
     </script>
 </body>
